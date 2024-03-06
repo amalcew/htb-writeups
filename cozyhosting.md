@@ -254,7 +254,7 @@ Loaded 1 password hash (bcrypt [Blowfish 32/64 X3])
 Cost 1 (iteration count) is 1024 for all loaded hashes
 Will run 4 OpenMP threads
 Press 'q' or Ctrl-C to abort, almost any other key for status
-manchesterunited (?)     
+ma************ed (?)   
 1g 0:00:00:45 DONE (2024-02-22 19:24) 0.02182g/s 61.28p/s 61.28c/s 61.28C/s catcat..keyboard
 Use the "--show" option to display all of the cracked passwords reliably
 Session completed. 
