@@ -6,4 +6,4 @@ This repository contains writeups of HTB machines tested and penetrated during a
 
 
 ### Disclaimer
-The writeups **can contain spoilers** about the active machines on HTB
+The writeups **can contain spoilers** regarding active machines on Hack the Box!
