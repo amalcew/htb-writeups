@@ -81,3 +81,24 @@ This subtle nudge gives a hint, that the way to penetrate the website will requi
 
 ![image](https://github.com/amalcew/htb-writeups/assets/73908014/27e0f744-2634-4648-9f40-d0b51bb59db0)
 
+## Initial foothold
+
+### XSS cookie exfiltration
+
+In theory, if the server recognizes the malicious input inside 'message' field, it means that it can be vulnerable to XSS attacks. There is a way to steal the cookies using XSS attack on the website, documented in [this post](https://pswalia2u.medium.com/exploiting-xss-stealing-cookies-csrf-2325ec03136e) and on [Portswigger's Academy](https://portswigger.net/web-security/cross-site-scripting/exploiting/lab-stealing-cookies).
+
+The way it is done is relatively simple. Threat actor needs to send a malicious content to the server which will be triggered when someone displays a page that contains it. This type of attack is called **stored XSS**, as the payload lays on the server and is activated by the victim.
+After many attempts I've managed to intercept the cookie encoded in base64, by using some techniques from Portswigger's Lab and from the post:
+
+![04-exfiltrated_cookie_1](https://github.com/amalcew/htb-writeups/assets/73908014/ce1ed470-814f-40fd-9405-11098e14aeee)
+
+The probable reason why the payload was required to be sent inside `User-Agent` field is the fact, that the `Hacking detected` page contains this field as one of the evidences, but not `message` content. That's why no attempt with stealing the cookie by using the `message` field was successful.
+
+The output now needs to be decoded from base64 and inserted into the cookie value:
+
+```bash
+> echo **** | base64 -d
+is_admin; is_admin=ImFk**********************XpH0 
+```
+
+![05-dashboard](https://github.com/amalcew/htb-writeups/assets/73908014/ef08bc73-4754-4860-9666-f92b96e5cbad)
