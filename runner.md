@@ -227,3 +227,87 @@ john@runner:~$ cat user.txt
 31****************************6c
 ```
 
+## Privileges escalation
+
+### Hidden service
+
+After landing into the machine, I've started to enumerate it. The machine has some interesting secres, some open ports:
+
+```bash
+john@runner:~$ netstat -tulpn
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name    
+tcp        0      0 127.0.0.1:9443          0.0.0.0:*               LISTEN      -                   
+tcp        0      0 127.0.0.1:8111          0.0.0.0:*               LISTEN      -                   
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      -                   
+tcp        0      0 0.0.0.0:80              0.0.0.0:*               LISTEN      -                   
+tcp        0      0 127.0.0.1:5005          0.0.0.0:*               LISTEN      -                   
+tcp        0      0 127.0.0.1:9000          0.0.0.0:*               LISTEN      -                   
+tcp        0      0 127.0.0.53:53           0.0.0.0:*               LISTEN      -                   
+tcp6       0      0 :::8000                 :::*                    LISTEN      -                   
+tcp6       0      0 :::22                   :::*                    LISTEN      -                   
+tcp6       0      0 :::80                   :::*                    LISTEN      -                   
+udp        0      0 127.0.0.53:53           0.0.0.0:*                           -                   
+udp        0      0 0.0.0.0:68              0.0.0.0:*                           -                   
+```
+
+And enigmatic directory `/data` inside root directory, owned by root user:
+
+```bash
+john@runner:~$ ls /
+bin   data  etc   lib    lib64   lost+found  mnt  proc  run   srv  tmp  var
+boot  dev   home  lib32  libx32  media       opt  root  sbin  sys  usr
+john@runner:~$ ls -al /data
+total 132
+drwxr-xr-x  9 root root   4096 Feb 28 10:31 .
+drwxr-xr-x 19 root root   4096 Apr  4 10:24 ..
+drwx------  2 root root   4096 Feb 28 07:51 bin
+drwx------  2 root root   4096 Feb 28 07:51 certs
+drwx------  2 root root   4096 Feb 28 07:51 chisel
+drwx------  2 root root   4096 Feb 28 07:51 compose
+drwx------  2 root root   4096 Feb 28 07:51 docker_config
+-rw-------  1 root root 131072 May 24 18:56 portainer.db
+-rw-------  1 root root    227 Feb 28 07:51 portainer.key
+-rw-------  1 root root    190 Feb 28 07:51 portainer.pub
+drwxr-xr-x  4 root root   4096 Feb 28 10:31 teamcity_server
+drwx------  2 root root   4096 Feb 28 07:51 tls
+```
+
+This directory points to one of the container services, called `portainer`. The service allows user for easy management of the containers and utilizes port `9443`.
+
+After forwarding the port to our machine and opening the browser on `localhost:9443` we are greeted with Portainer's login page:
+
+![05-portainer](https://github.com/amalcew/htb-writeups/assets/73908014/74083bf7-1f8c-4b6b-a0cd-7ed6ba5da2fa)
+
+Using cracked credentials for user `matthew` we can access the admin panel:
+
+![06-portainer_panel](https://github.com/amalcew/htb-writeups/assets/73908014/ee7a66f0-2325-4bf6-94cc-4d0f8c0f4434)
+
+### Docker breakout
+
+Durin research of the Portainer service, I've found interesting [PoC for escalating privileges](https://rioasmara.com/2021/08/15/use-portainer-for-privilege-escalation/). As the described method used older version of Portainer, breaking out of this instance required some additional steps.
+
+First, I've created a shared volume that pointed to host's root directory: 
+
+![image](https://github.com/amalcew/htb-writeups/assets/73908014/21a052df-28fa-4462-86eb-30645ee42a09)
+
+After grabbing one of the existing images ID:
+
+![image](https://github.com/amalcew/htb-writeups/assets/73908014/8a6b543d-51e3-4e9b-bca9-2ed7926afa35)
+
+I've created new container with connected volume and interactive tty session. It was also required, that the container's user was set to `root`:
+
+![image](https://github.com/amalcew/htb-writeups/assets/73908014/9236c6bf-7a5b-432f-a85c-cb2804298042)
+
+![image](https://github.com/amalcew/htb-writeups/assets/73908014/09b3e13b-c262-4923-90a0-87c59f6f5c5a)
+
+After creating the container, I've headed to container's console:
+
+![image](https://github.com/amalcew/htb-writeups/assets/73908014/e0abbd84-ade5-43b2-9e04-bdcb09bcbd01)
+
+This way I've been able to gain access to root on the host machine and exfiltrate the system flag:
+
+![07-docker_breakout](https://github.com/amalcew/htb-writeups/assets/73908014/abc2acc9-e137-4bc3-bc7b-3849347b175b)
+
+
+
